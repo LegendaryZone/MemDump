@@ -10,13 +10,15 @@
 #include <sys/stat.h>
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <ctype.h>
 
 #define MAX_BUFF_LEN     1024
 #define MAX_SEGMENT_SIZE 5120
 
 typedef unsigned long ulong;
 
-typedef struct segment {
+typedef struct segment
+{
     ulong start;
     ulong end;
     char module_name[MAX_BUFF_LEN];
@@ -26,7 +28,7 @@ void str_tolower(char *str)
 {
     int i;
     for (i = 0; i < strlen(str); i++) {
-        str[i] = (char) tolower(str[i]);
+        str[i] = (char)tolower(str[i]);
     }
 }
 
@@ -34,12 +36,12 @@ int exec_command(const char* cmd, const char *feature, char *res)
 {
     char buff[MAX_BUFF_LEN];
     FILE *fp = popen(cmd, "r");
-    if (fp == NULL){
+    if (fp == NULL) {
         printf("[*] Exec popen failed {%d, %s}\n", errno, strerror(errno));
         return -1;
     }
-    while (fgets(buff, sizeof(buff), fp) != NULL){
-        if (strstr(buff, feature) != NULL){
+    while (fgets(buff, sizeof(buff), fp) != NULL) {
+        if (strstr(buff, feature) != NULL) {
             strcpy(res, buff);
             return 0;
         }
@@ -59,39 +61,39 @@ int get_process_pid(const char *process)
     //search by ps commamd
     sprintf(cmd, "ps | grep %s", process);
     int res_code = exec_command(cmd, process, buff);
-    if(res_code != 0){
+    if (res_code != 0) {
         printf("[-] Exec command: %s failed\n", cmd);
     } else {
         pid_t running_pid;
         sscanf(buff, "%*s\t%d  %*d\t%*d %*d %*x %*x %*c %s", &running_pid, running_process);
-        if (strcmp(running_process, process) == 0){
+        if (strcmp(running_process, process) == 0) {
             pid = running_pid;
         }
     }
 
     //search by cmdline file
-    if (pid > 0){
+    if (pid > 0) {
         return pid;
-    }else{
+    } else {
         char file_name[MAX_BUFF_LEN];
         DIR *dir_proc;
         FILE *fp;
-        if ((dir_proc = opendir("/proc")) == NULL){
+        if ((dir_proc = opendir("/proc")) == NULL) {
             printf("[*] Exec opendir failed {%d, %s}\n", errno, strerror(errno));
             return 0;
         }
         struct dirent *dirent;
-        while ((dirent = readdir(dir_proc)) != NULL){
+        while ((dirent = readdir(dir_proc)) != NULL) {
             sprintf(file_name, "/proc/%s/cmdline", dirent->d_name);
             fp = fopen(file_name, "r");
-            if (fp == NULL){
+            if (fp == NULL) {
                 continue;
             }
             fscanf(fp, "%s", running_process);
             fclose(fp);
             fp = NULL;
 
-            if (strcmp(running_process, process) == 0){
+            if (strcmp(running_process, process) == 0) {
                 pid = (uint32_t)atoi(dirent->d_name);
                 break;
             }
@@ -142,8 +144,8 @@ int attach_process(pid_t pid, int *handle) {
 
 int detach_process(pid_t pid) {
     if (ptrace(PTRACE_DETACH, pid, NULL, NULL) < 0) {
-      perror(NULL);
-      return -1;
+        perror(NULL);
+        return -1;
     }
     return 0;
 }
@@ -197,7 +199,7 @@ int dump_module(int mem_handle, ulong start, ulong end, const char* output)
     ulong size = end - start;
     int res_code = 0;
     if (lseek(mem_handle, start, SEEK_SET) != -1) {
-        char *content = (char *) malloc(size * sizeof(char));
+        char *content = (char *)malloc(size * sizeof(char));
         ssize_t dump_size = read(mem_handle, content, size);
 
         FILE *output_handle = fopen(output, "wb");
@@ -217,62 +219,69 @@ int dump_module(int mem_handle, ulong start, ulong end, const char* output)
     }
 }
 
+static ulong read_ulong(const char *s) 
+{
+    if (s[0] == '0' && s[1] == 'x')
+        return strtoull(s + 2, NULL, 16);
+    else
+        return atoll(s);
+}
+
 int main(int argc, char const *argv[])
 {
-    char process[MAX_BUFF_LEN] = "";
-    pid_t pid;
-    ulong start;
-    ulong end;
-    char module[MAX_BUFF_LEN] = "";
-    char output[MAX_BUFF_LEN] = "";
-
+    char process[MAX_BUFF_LEN] = {};
     strncpy(process, argv[1], strlen(argv[1]));
-    pid = atoi(argv[2]);
-    start = atoll(argv[3]);
-    end = atoll(argv[4]);
-    strncpy(module, argv[5], strlen(argv[5]));
+
+    pid_t pid   = atoi(argv[2]);
+    ulong start = read_ulong(argv[3]);
+    ulong end   = read_ulong(argv[4]);
+
+    char module_name[MAX_BUFF_LEN] = {};
+    strncpy(module_name, argv[5], strlen(argv[5]));
+
+    char output[MAX_BUFF_LEN] = {};
     strncpy(output, argv[6], strlen(argv[6]));
 
     printf("[+] Input args: {process:%s, pid:%d, start:0x%lx, end:0x%lx, module:%s, output:%s}\n",
-           process, pid, start, end, module, output);
+           process, pid, start, end, module_name, output);
 
     //check process or pid
-    if (pid == 0){
-        if (strncmp(process, "-", 1) == 0){
+    if (pid == 0) {
+        if (strncmp(process, "-", 1) == 0) {
             printf("[-] Must input process or pid\n");
             return -1;
         }
         pid = get_process_pid(process);
-        if(pid == 0 ){
+        if (pid == 0) {
             printf("[-] Can't find pid by process name\n");
             return -1;
-        } else{
+        } else {
             printf("[+] Get %s pid: %d\n", process, pid);
         }
-    }else{
+    } else {
         char cmd[MAX_BUFF_LEN];
         char buff[MAX_BUFF_LEN];
         char pid_str[MAX_BUFF_LEN];
         sprintf(pid_str, "%d", pid);
         sprintf(cmd, "ps | grep %d", pid);
         int res_code = exec_command(cmd, pid_str, buff);
-        if(res_code != 0){
+        if (res_code != 0) {
             printf("[-] Can't find process by pid: %d\n", pid);
-            return -1; 
+            return -1;
         }
         printf("[+] Find process by pid: %d\n", pid);
     }
 
     //get sub_pid
     int sub_pid = get_sub_pid(pid);
-    if(sub_pid != 0){
+    if (sub_pid != 0) {
         printf("[+] Get sub pid:%d success\n", sub_pid);
         pid = sub_pid;
     }
 
     int mem_handle = 0;
     int res_code = attach_process(pid, &mem_handle);
-    if(res_code != 0){
+    if (res_code != 0) {
         printf("[-] Attach pid:%d failed", pid);
         return -1;
     }
@@ -281,37 +290,37 @@ int main(int argc, char const *argv[])
     segment *segments = malloc(sizeof(segment) * MAX_SEGMENT_SIZE);
     int segment_size = 0;
     res_code = read_maps(pid, segments, &segment_size);
-    if(res_code != 0){
+    if (res_code != 0) {
         printf("[-] Read segment information failed\n");
     }
     printf("[+] Read segment information success, size: %d\n", segment_size);
 
     //check module name or scope address
-    if(start == 0 || end == 0){
-        if(strncmp(module, "-", 1) == 0){
+    if (start == 0 || end == 0) {
+        if (strncmp(module_name, "-", 1) == 0) {
             printf("[-] Must input available module name or scope address\n");
             return -1;
         }
         int i = 0;
         int has_module = 0;
-        for(i=0; i<segment_size; i++){
-            if(strstr(segments[i].module_name, module) != NULL){
+        for (i = 0; i < segment_size; i++) {
+            if (strstr(segments[i].module_name, module_name) != NULL) {
                 start = segments[i].start;
                 end = segments[i].end;
                 has_module = 1;
-                printf("[+] Target segment information: {start:0x%lx, end:0x%lx, name:%s}\n", start, end, module);
+                printf("[+] Target segment information: {start:0x%lx, end:0x%lx, name:%s}\n", start, end, module_name);
                 break;
             }
         }
-        if(has_module == 0){
-            printf("[-] Check input module name: %s\n", module);
+        if (has_module == 0) {
+            printf("[-] Check input module name: %s\n", module_name);
             return -1;
         }
     }
 
     res_code = dump_module(mem_handle, start, end, output);
-    if (res_code == 0){
-        printf("[+] Dump %s success", output);
+    if (res_code == 0) {
+        printf("[+] Dump %s success\n", output);
     }
 
     detach_process(pid);
